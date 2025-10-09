@@ -27,10 +27,9 @@ class MAIFormer(nn.Module):
 
 
     def forward(self, x_enc):
-
+        
+        B = enc_out.size(0)
         traj = x_enc[0].to(device)
-
-
         aircraft_type = x_enc[1].to(device).long()
 
         if aircraft_type.dim() == 3:
@@ -41,29 +40,21 @@ class MAIFormer(nn.Module):
         elif aircraft_type.dim() == 2 and aircraft_type.shape[1] == 1:
             aircraft_type = aircraft_type.squeeze(1)   
 
-        enc_out = traj.transpose(1,2)
+        traj_inv = traj.transpose(1,2)
+        enc_traj = self.enc_embedding(traj_inv)
+        num_agents = enc_traj.size(1) // 3
 
-        enc_out = self.enc_embedding(enc_out)
- 
-        num_agents = enc_out.size(1) // 3
+        enc_traj = enc_traj.reshape(B, num_agents, self.d_model*3)
+        enc_type = self.type_embed(aircraft_type)  
 
-
-        B = enc_out.size(0)
-        
-        enc_out = enc_out.reshape(B, num_agents, self.d_model*3)
-        type_embed = self.type_embed(aircraft_type)  
-
-        enc_out = enc_out + self.wtc_weight * type_embed
-
+        enc_out = enc_traj + self.wtc_weight * enc_type
         enc_out = enc_out.reshape(B, num_agents * 3, self.d_model)
 
-        num_agents = enc_out.size(1) // 3
-        B = enc_out.size(0)
-        all_attentions = []
+        agent_attentions = []
 
         for encoder in self.encoders:
-            enc_out,attention,feature_attention_score = encoder(enc_out)
-            all_attentions.append(attention)
+            enc_out,agent_attention,variate_attention = encoder(enc_out)
+            agent_attentions.append(attention)
 
         enc_out = enc_out.reshape(B, num_agents, self.d_model * 3)
 
@@ -71,4 +62,4 @@ class MAIFormer(nn.Module):
         dec_mean = dec_out[:,:,0]
         dec_sigma =  F.softplus(dec_out[:,:,1]) + 1e-6
 
-        return dec_mean,dec_sigma, all_attentions,feature_attention_score
+        return dec_mean, dec_sigma, agent_attention, variate_attention
